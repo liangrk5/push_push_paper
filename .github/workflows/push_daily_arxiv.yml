@@ -1,0 +1,64 @@
+name: Daily ArXiv Search-Ads-Rec Papers
+
+env:
+  PYTHON_VERSION: "3.12" # set this to the Python version to use
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+on:
+  workflow_dispatch:  # 允许手动触发
+  schedule:
+    - cron: '0 1 * * *' # 每天 UTC 时间 1:00 触发, 即北京时间9点
+
+jobs:
+  daily-push:
+    runs-on: ubuntu-latest
+    env:
+      QUERYS: ${{ secrets.QUERYS || 'cs.IR,cs.AI,cs.CL' }}
+      LIMITS: ${{ secrets.LIMITS || '10' }}
+
+    permissions:
+      issues: write
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python version
+        uses: actions/setup-python@v3
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests tqdm openai
+          pip install -q -U google-genai
+
+      - name: Create initial arxiv.json if needed
+        run: |
+          if [ ! -f "arxiv.json" ]; then
+            echo "[]" > arxiv.json
+          fi
+
+      - name: Fetch and filter arXiv papers
+        run: python push.py
+
+      - name: Commit changes to arxiv.json
+        id: commit
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "github-actions"
+          git add --all
+          if [ -z "$(git status --porcelain)" ]; then
+             echo "push=false" >> $GITHUB_OUTPUT
+          else
+             git commit -m "chore: update arxiv paper cache" -a
+             echo "push=true" >> $GITHUB_OUTPUT
+          fi
+        shell: bash
+
+      - name: Push changes
+        if: steps.commit.outputs.push == 'true'
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
